@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from 'react-leaflet';
 import L from 'leaflet';
-import { Volume2, VolumeX, Square, Navigation2, Loader2, AlertTriangle, CheckCircle } from 'lucide-react';
+import { Volume2, VolumeX, Square, Navigation2, Loader2, AlertTriangle, CheckCircle, ChevronDown, Search } from 'lucide-react';
 import { NavigationTarget } from '@/app/page';
 
 interface DefaultIcon extends L.Icon.Default {
@@ -41,7 +41,6 @@ function getDistance(p1: [number, number], p2: [number, number]) {
   return R * c;
 }
 
-// Distance from point to a line segment
 function distToSegmentSquared(p: [number, number], v: [number, number], w: [number, number]) {
   const l2 = Math.pow(v[0] - w[0], 2) + Math.pow(v[1] - w[1], 2);
   if (l2 === 0) return Math.pow(p[0] - v[0], 2) + Math.pow(p[1] - v[1], 2);
@@ -51,7 +50,7 @@ function distToSegmentSquared(p: [number, number], v: [number, number], w: [numb
 }
 
 function distToSegment(p: [number, number], v: [number, number], w: [number, number]) {
-  return Math.sqrt(distToSegmentSquared(p, v, w)) * 111320; // approximate meters
+  return Math.sqrt(distToSegmentSquared(p, v, w)) * 111320;
 }
 
 function destinationOffsetForLabel(label: string): [number, number] {
@@ -70,15 +69,24 @@ function destinationOffsetForLabel(label: string): [number, number] {
 
 function MapUpdater({ currentLoc, navState }: { currentLoc: [number, number] | null, navState: string }) {
   const map = useMap();
+  const hasPanned = useRef(false);
   useEffect(() => {
-    if (currentLoc && navState === 'NAVIGATING') {
-      map.setView(currentLoc, 18, { animate: true, duration: 1 });
-    } else if (currentLoc && navState === 'IDLE') {
-      map.setView(currentLoc, 16);
+    if (currentLoc && !hasPanned.current) {
+      map.setView(currentLoc, navState === 'NAVIGATING' ? 18 : 16);
+      setTimeout(() => { hasPanned.current = true; }, 3000);
     }
   }, [currentLoc, navState, map]);
   return null;
 }
+
+const DEFAULT_DESTINATIONS = [
+  { label: 'Washroom', icon: '🚻' },
+  { label: 'Exit Gate', icon: '🚪' },
+  { label: 'First Aid', icon: '🏥' },
+  { label: 'Food Court', icon: '🍔' },
+  { label: 'Ticket Booth', icon: '🎫' },
+  { label: 'Parking', icon: '🅿️' },
+];
 
 interface RouteStep {
   order: number;
@@ -104,12 +112,16 @@ export default function MapInner({ onClose, target }: { onClose?: () => void; ta
   
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [isMuted, setIsMuted] = useState(false);
+  const [routePanelOpen, setRoutePanelOpen] = useState(true);
+  const [showDestPicker, setShowDestPicker] = useState(false);
+  const [destInput, setDestInput] = useState('');
   
-  const watchId = useRef<number | null>(null);
+  const watchIdRef = useRef<number | null>(null);
   const lastLoc = useRef<[number, number] | null>(null);
   const lastTime = useRef<number>(0);
   const currentStepIdx = useRef<number>(0);
   const announcedSteps = useRef<Set<number>>(new Set());
+  const locState = useRef<'INIT' | 'OK'>('INIT');
 
   const speak = useCallback((text: string, force = false) => {
     if (isMuted && !force) return;
@@ -123,7 +135,6 @@ export default function MapInner({ onClose, target }: { onClose?: () => void; ta
 
   const fetchRoute = useCallback(async (start: [number, number], end: [number, number]) => {
     try {
-      // OSRM: lon,lat
       const res = await fetch(`https://router.project-osrm.org/route/v1/foot/${start[1]},${start[0]};${end[1]},${end[0]}?overview=full&geometries=geojson&steps=true`);
       if (!res.ok) throw new Error('Route fetch failed');
       const data = await res.json();
@@ -131,7 +142,7 @@ export default function MapInner({ onClose, target }: { onClose?: () => void; ta
         const route = data.routes[0];
         const coords = route.geometry.coordinates.map((c: number[]) => [c[1], c[0]] as [number, number]);
         setRouteCoords(coords);
-        if (totalDistance === 0) setTotalDistance(route.distance);
+        setTotalDistance(route.distance);
         
         if (route.legs && route.legs[0].steps) {
           setSteps(route.legs[0].steps);
@@ -147,7 +158,20 @@ export default function MapInner({ onClose, target }: { onClose?: () => void; ta
       return false;
     }
     return false;
-  }, [totalDistance]);
+  }, []);
+
+  const pickDestination = useCallback((label: string) => {
+    setDestinationLabel(label);
+    setShowDestPicker(false);
+    setDestInput('');
+    if (currentLoc) {
+      const [dLat, dLng] = destinationOffsetForLabel(label);
+      const nextDest: [number, number] = [currentLoc[0] + dLat, currentLoc[1] + dLng];
+      setDestLoc(nextDest);
+      void fetchRoute(currentLoc, nextDest);
+      setNavState('IDLE');
+    }
+  }, [currentLoc, fetchRoute]);
 
   useEffect(() => {
     if (!target) return;
@@ -166,119 +190,92 @@ export default function MapInner({ onClose, target }: { onClose?: () => void; ta
 
   useEffect(() => {
     if (!navigator.geolocation) {
-      setTimeout(() => {
-        setErrorMsg("GPS not supported");
-        setNavState('ERROR');
-      }, 0);
+      setTimeout(() => { setNavState('ERROR'); setErrorMsg('GPS not supported'); }, 0);
       return;
     }
 
-    let retryCount = 0;
-    const maxRetries = 3;
-    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    try {
+      const saved = localStorage.getItem('loc');
+      if (saved) {
+        const parsed = JSON.parse(saved) as [number, number];
+        const dLatOffset = destinationOffsetForLabel(destinationLabel)[0];
+        const dLngOffset = destinationOffsetForLabel(destinationLabel)[1];
+        setCurrentLoc(parsed);
+        setDestLoc([parsed[0] + dLatOffset, parsed[1] + dLngOffset]);
+        setNavState('IDLE');
+      }
+    } catch { /* ignore */ }
 
-    const startWatch = () => {
-      watchId.current = navigator.geolocation.watchPosition(
-        async (pos: GeolocationPosition) => {
-          retryCount = 0; // Reset on success
-          setErrorMsg(null);
-          
-          const { latitude, longitude } = pos.coords;
-          const newLoc: [number, number] = [latitude, longitude];
-          
-          const now = Date.now();
-          if (lastLoc.current) {
-            const dist = getDistance(lastLoc.current, newLoc);
-            const timeDiff = (now - lastTime.current) / 1000;
-            if (timeDiff > 0) {
-              setSpeed(Math.round((dist / timeDiff) * 3.6)); // km/h
-            }
-          } else {
-            setCurrentLoc(newLoc);
-            const [dLat, dLng] = destinationOffsetForLabel(destinationLabel);
-            const simulatedDest: [number, number] = [latitude + dLat, longitude + dLng];
-            setDestLoc(simulatedDest);
-            setNavState('IDLE');
-            await fetchRoute(newLoc, simulatedDest);
-          }
-          
-          lastLoc.current = newLoc;
-          lastTime.current = now;
-          setCurrentLoc(newLoc);
-        },
-        (err) => {
-          if (err.code === 1) {
-            setErrorMsg("Location permission denied.");
-            if (!lastLoc.current) setNavState('ERROR');
-          } else if (err.code === 2) {
-            setErrorMsg("Current location unavailable.");
-            if (!lastLoc.current) setNavState('ERROR');
-          } else if (err.code === 3) {
-            if (retryCount < maxRetries) {
-              retryCount++;
-              setErrorMsg("Unable to obtain GPS location. Retrying...");
-              if (!lastLoc.current) setNavState('LOADING');
-              
-              if (watchId.current !== null) navigator.geolocation.clearWatch(watchId.current);
-              timeoutId = setTimeout(() => startWatch(), 2000);
-            } else {
-              setErrorMsg("Unable to obtain GPS location.");
-              if (!lastLoc.current) setNavState('ERROR');
-            }
-          } else {
-            setErrorMsg("Unknown location error.");
-            if (!lastLoc.current) setNavState('ERROR');
-          }
-        },
-        { enableHighAccuracy: false, timeout: 15000, maximumAge: 1000 }
-      );
-    };
+    watchIdRef.current = navigator.geolocation.watchPosition(
+      (pos) => {
+        const { latitude, longitude } = pos.coords;
+        const newLoc: [number, number] = [latitude, longitude];
+        localStorage.setItem('loc', JSON.stringify(newLoc));
 
-    startWatch();
+        const dLatOffset = destinationOffsetForLabel(destinationLabel)[0];
+        const dLngOffset = destinationOffsetForLabel(destinationLabel)[1];
+
+        const now = Date.now();
+        if (lastLoc.current) {
+          const dist = getDistance(lastLoc.current, newLoc);
+          const timeDiff = (now - lastTime.current) / 1000;
+          if (timeDiff > 0) setSpeed(Math.round((dist / timeDiff) * 3.6));
+        } else {
+          if (!destLoc.current) {
+            const simDest: [number, number] = [latitude + dLatOffset, longitude + dLngOffset];
+            setDestLoc(simDest);
+          }
+          if (locState.current === 'INIT') { locState.current = 'OK'; setNavState('IDLE'); }
+        }
+
+        lastLoc.current = newLoc;
+        lastTime.current = now;
+        setCurrentLoc(newLoc);
+        setErrorMsg(null);
+      },
+      (err) => {
+        if (err.code === 1) { setErrorMsg('Permission denied.'); setNavState('ERROR'); }
+        else if (err.code === 3 && locState.current === 'INIT') {
+          setNavState('LOADING');
+          setErrorMsg('Acquiring GPS\u2026');
+        }
+      },
+      { enableHighAccuracy: false, timeout: 10000, maximumAge: 10000 }
+    );
 
     return () => {
-      if (watchId.current !== null) {
-        navigator.geolocation.clearWatch(watchId.current);
-      }
-      if (timeoutId) {
-        clearTimeout(timeoutId);
+      if (watchIdRef.current !== null) {
+        navigator.geolocation.clearWatch(watchIdRef.current);
       }
     };
-  }, [fetchRoute, destinationLabel]);
+  }, [destinationLabel]);
 
   // Route monitoring loop
   useEffect(() => {
     if (navState !== 'NAVIGATING' || !currentLoc || !destLoc || routeCoords.length === 0) return;
 
-    // 1. Check arrival
     const distToDest = getDistance(currentLoc, destLoc);
     
     if (distToDest < 15) {
-      setTimeout(() => {
-        setNavState('ARRIVED');
-        speak(`You have reached ${destinationLabel}.`, true);
-      }, 0);
+      setNavState('ARRIVED');
+      speak(`You have reached ${destinationLabel}.`, true);
       return;
     }
 
-    // 2. Check route deviation
+    // Check deviation — only recalc if >50m off route to avoid loops
     let minSegDist = Infinity;
     for (let i = 0; i < routeCoords.length - 1; i++) {
       const d = distToSegment(currentLoc, routeCoords[i], routeCoords[i+1]);
       if (d < minSegDist) minSegDist = d;
     }
     
-    // If deviation > 30m, recalculate
-    if (minSegDist > 30) {
-      setTimeout(() => fetchRoute(currentLoc, destLoc), 0);
-      speak("Recalculating route.", true);
+    if (minSegDist > 50) {
+      fetchRoute(currentLoc, destLoc);
       return;
     }
 
-    // 3. Voice guidance for steps
     if (steps.length > currentStepIdx.current) {
       const step = steps[currentStepIdx.current];
-      // step location is [lon, lat]
       type StepWithLocation = { maneuver: { location: [number, number] } };
       const stepLoc: [number, number] = [(step as StepWithLocation).maneuver.location[1], (step as StepWithLocation).maneuver.location[0]];
       const distToStep = getDistance(currentLoc, stepLoc);
@@ -296,7 +293,6 @@ export default function MapInner({ onClose, target }: { onClose?: () => void; ta
         setCurrentInstruction(instructionText);
         setNextTurnDistance(Math.round(distToStep));
 
-        // Simple human-readable string mapping
         if (s.maneuver?.type === 'turn') {
           speak(`Turn ${s.maneuver.modifier}.`);
         } else if (s.maneuver?.type === 'arrive') {
@@ -329,10 +325,8 @@ export default function MapInner({ onClose, target }: { onClose?: () => void; ta
   const [etaStr, setEtaStr] = useState('');
   useEffect(() => {
     if (computedDistance > 0) {
-      setTimeout(() => {
-        const mins = Math.max(1, Math.round(computedDistance / 80));
-        setEtaStr(new Date(Date.now() + mins * 60000).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}));
-      }, 0);
+      const mins = Math.max(1, Math.round(computedDistance / 80));
+      setEtaStr(new Date(Date.now() + mins * 60000).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}));
     }
   }, [computedDistance]);
 
@@ -352,9 +346,7 @@ export default function MapInner({ onClose, target }: { onClose?: () => void; ta
         <span className="text-red-400 font-medium">Navigation Error</span>
         <span className="text-red-400/80 text-sm mb-4">{errorMsg}</span>
         <button 
-          onClick={() => {
-            window.location.reload();
-          }}
+          onClick={() => { window.location.reload(); }}
           className="bg-red-600 hover:bg-red-500 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
         >
           Retry Location
@@ -366,7 +358,54 @@ export default function MapInner({ onClose, target }: { onClose?: () => void; ta
   return (
     <div className="w-full h-full flex flex-col relative bg-zinc-900">
       
-      {/* HUD: Turn Instruction Card (Google Maps Style Top Banner) */}
+      {/* Destination Picker Modal */}
+      {showDestPicker && (
+        <div className="absolute inset-0 z-[2000] bg-black/60 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl w-full max-w-sm max-h-[80vh] flex flex-col overflow-hidden">
+            <div className="p-4 border-b border-zinc-200 flex items-center justify-between">
+              <h3 className="font-bold text-lg">Choose Destination</h3>
+              <button onClick={() => setShowDestPicker(false)} className="text-zinc-500 text-2xl">&times;</button>
+            </div>
+            <div className="p-3">
+              <div className="flex items-center gap-2 bg-zinc-100 rounded-xl px-3 py-2">
+                <Search size={18} className="text-zinc-400" />
+                <input
+                  type="text"
+                  value={destInput}
+                  onChange={(e) => setDestInput(e.target.value)}
+                  placeholder="Search destinations..."
+                  className="bg-transparent outline-none text-sm flex-1"
+                />
+              </div>
+            </div>
+            <div className="flex-1 overflow-y-auto p-3 pt-0 space-y-1">
+              {DEFAULT_DESTINATIONS
+                .filter(d => d.label.toLowerCase().includes(destInput.toLowerCase()))
+                .map(d => (
+                  <button
+                    key={d.label}
+                    onClick={() => pickDestination(d.label)}
+                    className="w-full flex items-center gap-3 px-3 py-3 rounded-xl hover:bg-zinc-100 transition-colors text-left"
+                  >
+                    <span className="text-xl">{d.icon}</span>
+                    <span className="font-medium">{d.label}</span>
+                  </button>
+                ))}
+              {destInput.trim() && (
+                <button
+                  onClick={() => pickDestination(destInput.trim())}
+                  className="w-full flex items-center gap-3 px-3 py-3 rounded-xl hover:bg-blue-50 transition-colors text-left text-blue-600"
+                >
+                  <Search size={18} />
+                  <span className="font-medium">Go to &ldquo;{destInput.trim()}&rdquo;</span>
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* HUD: Turn Instruction Card */}
       {navState === 'NAVIGATING' && (
         <div className="absolute top-0 left-0 right-0 z-[1000] p-3 pointer-events-none transition-transform">
           <div className="bg-green-600 rounded-2xl shadow-xl p-4 flex items-center gap-4 text-white pointer-events-auto border-b-4 border-green-700">
@@ -383,7 +422,7 @@ export default function MapInner({ onClose, target }: { onClose?: () => void; ta
 
       {/* Map Area */}
       <div className="absolute inset-0 w-full h-full z-0">
-        <MapContainer center={currentLoc || [0,0]} zoom={16} className="h-full w-full" zoomControl={false}>
+        <MapContainer center={currentLoc || [0,0]} zoom={16} className="h-full w-full" zoomControl={true}>
           <TileLayer
             attribution='&copy; OpenStreetMap'
             url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
@@ -400,7 +439,6 @@ export default function MapInner({ onClose, target }: { onClose?: () => void; ta
           <MapUpdater currentLoc={currentLoc} navState={navState} />
         </MapContainer>
         
-        {/* On-Map HUD overlay (Compass, Recenter, Speed) */}
         {navState === 'NAVIGATING' && (
           <div className="absolute top-32 right-3 z-[1000] flex flex-col gap-2 pointer-events-none">
             <div className="bg-white rounded-full p-2 pointer-events-auto shadow-md flex flex-col items-center justify-center w-12 h-12">
@@ -411,93 +449,128 @@ export default function MapInner({ onClose, target }: { onClose?: () => void; ta
         )}
       </div>
       
-      {/* Floating Panel */}
-      <div className="absolute bottom-4 left-4 right-4 md:left-auto md:right-4 md:w-96 bg-white rounded-3xl shadow-2xl z-[1000] flex flex-col pointer-events-auto p-4 pb-4">
-        
-        {navState === 'ARRIVED' ? (
-          <div className="px-2 pb-2">
-            <div className="w-full flex flex-col items-center justify-center gap-2 text-emerald-600 font-bold py-4">
-              <CheckCircle size={40} />
-              <span className="text-xl">You have arrived</span>
-            </div>
-            <button 
-              onClick={endNav}
-              className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-xl text-lg font-bold transition-colors active:scale-[0.98]"
-            >
-              Done
-            </button>
-          </div>
-        ) : (
-          <div className="flex flex-col gap-4">
-            <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3">
-              <div className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Route Summary</div>
-              <div className="mt-1 text-sm text-zinc-800">
-                <div><span className="font-medium">Current:</span> {currentLoc ? `${currentLoc[0].toFixed(5)}, ${currentLoc[1].toFixed(5)}` : 'Locating...'}</div>
-                <div><span className="font-medium">Destination:</span> {destinationLabel}</div>
-                <div><span className="font-medium">Route:</span> {routeCoords.length > 1 ? `Highlighted (${routeCoords.length} points)` : 'Computing...'}</div>
-              </div>
-              {plannedSteps.length > 0 && (
-                <ol className="mt-2 list-decimal pl-4 text-xs text-zinc-600">
-                  {plannedSteps.slice(0, 3).map((step) => (
-                    <li key={`${step.order}-${step.to_zone}`}>{step.instruction}</li>
-                  ))}
-                </ol>
-              )}
-            </div>
+      {/* Collapsible Route Panel */}
+      <div className={`absolute bottom-0 left-0 right-0 z-[1000] transition-all duration-300 ${routePanelOpen ? '' : 'translate-y-[calc(100%-48px)]'}`}>
+        {/* Collapse Handle */}
+        <button
+          onClick={() => setRoutePanelOpen(p => !p)}
+          className="mx-auto flex items-center gap-1 bg-white rounded-t-2xl px-6 py-1.5 shadow-lg border-t border-x border-zinc-200 w-fit"
+        >
+          <div className="w-8 h-1 bg-zinc-300 rounded-full" />
+          <ChevronDown size={16} className={`text-zinc-400 transition-transform ${routePanelOpen ? 'rotate-180' : ''}`} />
+        </button>
 
-            {/* Progress Bar */}
-            {navState === 'NAVIGATING' && totalDistance > 0 && (
-              <div className="w-full bg-zinc-100 rounded-full h-2 mt-1 overflow-hidden">
-                <div 
-                  className="bg-blue-600 h-full rounded-full transition-all duration-1000 ease-out" 
-                  style={{ width: `${Math.max(0, Math.min(100, ((totalDistance - computedDistance) / totalDistance) * 100))}%` }}
-                />
-              </div>
-            )}
-            
-            <div className="flex items-center justify-between px-2">
-              <div className="flex flex-col">
-                <span className="text-2xl font-bold text-green-600">{Math.max(1, Math.round(computedDistance/80))} min</span>
-                <span className="text-sm text-zinc-500 font-medium">{computedDistance} meters • Arrival {etaStr}</span>
+        <div className="bg-white shadow-2xl p-4 max-h-[40vh] overflow-y-auto">
+          {navState === 'ARRIVED' ? (
+            <div className="flex flex-col items-center gap-2">
+              <div className="flex flex-col items-center justify-center gap-2 text-emerald-600 font-bold py-4">
+                <CheckCircle size={40} />
+                <span className="text-xl">You have arrived</span>
               </div>
               <button 
-                onClick={toggleMute}
-                className="p-3 bg-zinc-100 hover:bg-zinc-200 text-zinc-600 rounded-full transition-colors"
+                onClick={endNav}
+                className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-xl text-lg font-bold transition-colors active:scale-[0.98]"
               >
-                {isMuted ? <VolumeX size={20} /> : <Volume2 size={20} />}
+                Done
               </button>
             </div>
-            
-            <div className="flex gap-3 mt-1">
+          ) : (
+            <div className="flex flex-col gap-3">
+              {/* Quick destination buttons */}
               {navState === 'IDLE' && (
-                <button 
-                  onClick={startNav}
-                  className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-xl text-base font-bold transition-all shadow-lg shadow-blue-600/30 flex items-center justify-center gap-2 active:scale-[0.98]"
-                >
-                  <Navigation2 size={20} /> Start
-                </button>
-              )}
-              
-              {navState === 'NAVIGATING' && (
-                <button 
-                  onClick={endNav}
-                  className="flex-1 bg-red-600 hover:bg-red-700 text-white py-3 rounded-xl text-base font-bold transition-all shadow-lg shadow-red-600/30 flex items-center justify-center gap-2 active:scale-[0.98]"
-                >
-                  <Square size={20} /> Exit
-                </button>
+                <div className="flex flex-wrap gap-2">
+                  {DEFAULT_DESTINATIONS.map(d => (
+                    <button
+                      key={d.label}
+                      onClick={() => pickDestination(d.label)}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${
+                        destinationLabel === d.label
+                          ? 'bg-blue-600 text-white'
+                          : 'bg-zinc-100 text-zinc-700 hover:bg-zinc-200'
+                      }`}
+                    >
+                      <span>{d.icon}</span>
+                      {d.label}
+                    </button>
+                  ))}
+                  <button
+                    onClick={() => setShowDestPicker(true)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium bg-zinc-100 text-zinc-700 hover:bg-zinc-200 transition-colors"
+                  >
+                    <Search size={14} />
+                    More
+                  </button>
+                </div>
               )}
 
-              {navState === 'IDLE' && (
-                <button 
-                  onClick={endNav}
-                  className="w-auto px-6 bg-zinc-200 hover:bg-zinc-300 text-zinc-800 py-3 rounded-xl text-base font-bold transition-all active:scale-[0.98]"
-                >
-                  Cancel
-                </button>
+              <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3">
+                <div className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Route Summary</div>
+                <div className="mt-1 text-sm text-zinc-800">
+                  <div><span className="font-medium">To:</span> {destinationLabel}</div>
+                  <div><span className="font-medium">Distance:</span> {computedDistance}m</div>
+                </div>
+                {plannedSteps.length > 0 && (
+                  <ol className="mt-2 list-decimal pl-4 text-xs text-zinc-600">
+                    {plannedSteps.slice(0, 3).map((step) => (
+                      <li key={`${step.order}-${step.to_zone}`}>{step.instruction}</li>
+                    ))}
+                  </ol>
+                )}
+              </div>
+
+              {navState === 'NAVIGATING' && totalDistance > 0 && (
+                <div className="w-full bg-zinc-100 rounded-full h-2 overflow-hidden">
+                  <div 
+                    className="bg-blue-600 h-full rounded-full transition-all duration-1000 ease-out" 
+                    style={{ width: `${Math.max(0, Math.min(100, ((totalDistance - computedDistance) / totalDistance) * 100))}%` }}
+                  />
+                </div>
               )}
+              
+              <div className="flex items-center justify-between px-2">
+                <div className="flex flex-col">
+                  <span className="text-2xl font-bold text-green-600">{Math.max(1, Math.round(computedDistance/80))} min</span>
+                  <span className="text-sm text-zinc-500 font-medium">{computedDistance} meters {etaStr ? `\u2022 Arrival ${etaStr}` : ''}</span>
+                </div>
+                <button 
+                  onClick={toggleMute}
+                  className="p-3 bg-zinc-100 hover:bg-zinc-200 text-zinc-600 rounded-full transition-colors"
+                >
+                  {isMuted ? <VolumeX size={20} /> : <Volume2 size={20} />}
+                </button>
+              </div>
+              
+              <div className="flex gap-3">
+                {navState === 'IDLE' && (
+                  <button 
+                    onClick={startNav}
+                    className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-xl text-base font-bold transition-all shadow-lg shadow-blue-600/30 flex items-center justify-center gap-2 active:scale-[0.98]"
+                  >
+                    <Navigation2 size={20} /> Start
+                  </button>
+                )}
+                
+                {navState === 'NAVIGATING' && (
+                  <button 
+                    onClick={endNav}
+                    className="flex-1 bg-red-600 hover:bg-red-700 text-white py-3 rounded-xl text-base font-bold transition-all shadow-lg shadow-red-600/30 flex items-center justify-center gap-2 active:scale-[0.98]"
+                  >
+                    <Square size={20} /> Exit
+                  </button>
+                )}
+
+                {navState === 'IDLE' && (
+                  <button 
+                    onClick={endNav}
+                    className="w-auto px-6 bg-zinc-200 hover:bg-zinc-300 text-zinc-800 py-3 rounded-xl text-base font-bold transition-all active:scale-[0.98]"
+                  >
+                    Cancel
+                  </button>
+                )}
+              </div>
             </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
     </div>
   );
