@@ -57,8 +57,17 @@ export function ChatMessage({ message }: ChatMessageProps) {
       window.dispatchEvent(new CustomEvent('action-navigate', { detail: { destination: query } }));
     };
     switch (message.intent) {
-      case 'NAVIGATION':
-        return <NavigationWidget />;
+      case 'NAVIGATION': {
+        const navigateAction = message.actions?.find(a => a.type === 'NAVIGATE');
+        const destination = navigateAction?.payload?.destination as string | undefined;
+        const routeSteps = message.plan?.map(p => ({
+          order: p.step,
+          instruction: p.description,
+          to_zone: p.action
+        }));
+        const targetPayload = destination ? { destination, routeSteps } : null;
+        return <NavigationWidget target={targetPayload} />;
+      }
       case 'FACILITY_SEARCH':
         return <FacilitiesWidget onNavigate={handleNavigate} />;
       case 'EMERGENCY':

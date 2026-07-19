@@ -158,6 +158,7 @@ export default function MapInner({ onClose, target }: { onClose?: () => void; ta
   const currentStepIdx = useRef<number>(0);
   const announcedSteps = useRef<Set<number>>(new Set());
   const locState = useRef<'INIT' | 'OK'>('INIT');
+  const lastTargetRef = useRef<NavigationTarget | null>(null);
 
   const speak = useCallback((text: string, force = false) => {
     if (isMuted && !force) return;
@@ -210,12 +211,14 @@ export default function MapInner({ onClose, target }: { onClose?: () => void; ta
   }, [currentLoc, fetchRoute]);
 
   useEffect(() => {
-    if (!target) return;
+    if (!target || target === lastTargetRef.current) return;
+    
     const nextLabel = target.destination && target.destination.trim().length > 0 ? target.destination : 'Destination';
     setDestinationLabel(nextLabel);
     setPlannedSteps(Array.isArray(target.routeSteps) ? target.routeSteps : []);
 
     if (currentLoc) {
+      lastTargetRef.current = target;
       const [dLat, dLng] = destinationOffsetForLabel(nextLabel);
       const nextDest: [number, number] = [currentLoc[0] + dLat, currentLoc[1] + dLng];
       setDestLoc(nextDest);

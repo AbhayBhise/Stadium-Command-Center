@@ -14,7 +14,7 @@ const MapInner = dynamic(() => import('./MapInner'), {
 
 export function NavigationWidget({ onClose, target }: { onClose?: () => void; target?: NavigationTarget | null }) {
   return (
-    <div className="w-full h-full flex flex-col flex-1">
+    <div className="w-full h-[350px] min-h-[300px] flex flex-col rounded-2xl overflow-hidden border border-zinc-800 relative mt-2">
       <MapInner onClose={onClose} target={target} />
     </div>
   );
