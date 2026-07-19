@@ -1,0 +1,532 @@
+// Stadium Command Center — Prisma Schema
+// PostgreSQL 16+ | Prisma ORM | UUID primary keys | Soft delete | AI-ready
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────
+// ENUMS
+// ─────────────────────────────────────────
+
+enum RoleName {
+  SPECTATOR
+  VOLUNTEER
+  ORGANIZER
+  ADMINISTRATOR
+}
+
+enum EventStatus {
+  SCHEDULED
+  LIVE
+  COMPLETED
+  CANCELLED
+}
+
+enum MessageSender {
+  USER
+  AI
+}
+
+enum FacilityType {
+  WASHROOM
+  FOOD_COURT
+  MEDICAL
+  ATM
+  ELEVATOR
+  ESCALATOR
+  MERCHANDISE
+  HELP_DESK
+}
+
+enum IncidentSeverity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum IncidentStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
+}
+
+enum DatasetStatus {
+  PENDING
+  PROCESSING
+  READY
+  FAILED
+}
+
+enum DatasetType {
+  CSV
+  JSON
+}
+
+enum NotificationType {
+  INFO
+  WARNING
+  ALERT
+  SUCCESS
+}
+
+// ─────────────────────────────────────────
+// ROLE
+// ─────────────────────────────────────────
+
+model Role {
+  id          String   @id @default(uuid())
+  name        RoleName @unique
+  description String?
+  users       User[]
+
+  @@map("roles")
+}
+
+// ─────────────────────────────────────────
+// USER
+// ─────────────────────────────────────────
+
+model User {
+  id                   String    @id @default(uuid())
+  fullName             String
+  email                String    @unique
+  passwordHash         String
+  roleId               String
+  preferredLanguage    String    @default("en")
+  accessibilityProfile Json?
+  profileImage         String?
+  lastLogin            DateTime?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+  deletedAt            DateTime?
+
+  role          Role           @relation(fields: [roleId], references: [id])
+  conversations Conversation[]
+  notifications Notification[]
+  feedback      Feedback[]
+  auditLogs     AuditLog[]     @relation("AuditActor")
+
+  @@index([email])
+  @@index([roleId])
+  @@index([deletedAt])
+  @@map("users")
+}
+
+// ─────────────────────────────────────────
+// STADIUM
+// ─────────────────────────────────────────
+
+model Stadium {
+  id             String    @id @default(uuid())
+  name           String
+  city           String
+  country        String
+  capacity       Int
+  timezone       String
+  packageVersion String?
+  description    String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  deletedAt      DateTime?
+
+  events          Event[]
+  zones           Zone[]
+  facilities      Facility[]
+  routes          Route[]
+  stadiumPackages StadiumPackage[]
+  knowledgeDocs   KnowledgeDocument[]
+  conversations   Conversation[]
+  incidents       Incident[]
+
+  @@index([deletedAt])
+  @@map("stadiums")
+}
+
+// ─────────────────────────────────────────
+// EVENT
+// ─────────────────────────────────────────
+
+model Event {
+  id          String      @id @default(uuid())
+  stadiumId   String
+  title       String
+  description String?
+  startTime   DateTime
+  endTime     DateTime
+  status      EventStatus @default(SCHEDULED)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  deletedAt   DateTime?
+
+  stadium       Stadium        @relation(fields: [stadiumId], references: [id])
+  conversations Conversation[]
+  incidents     Incident[]
+
+  @@index([stadiumId])
+  @@index([status])
+  @@index([startTime])
+  @@index([deletedAt])
+  @@map("events")
+}
+
+// ─────────────────────────────────────────
+// ZONE
+// ─────────────────────────────────────────
+
+model Zone {
+  id          String   @id @default(uuid())
+  stadiumId   String
+  name        String
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  stadium    Stadium    @relation(fields: [stadiumId], references: [id])
+  gates      Gate[]
+  facilities Facility[]
+  routesFrom Route[]    @relation("SourceZone")
+  routesTo   Route[]    @relation("DestinationZone")
+
+  @@index([stadiumId])
+  @@map("zones")
+}
+
+// ─────────────────────────────────────────
+// GATE
+// ─────────────────────────────────────────
+
+model Gate {
+  id                     String   @id @default(uuid())
+  zoneId                 String
+  gateNumber             String
+  accessibilitySupported Boolean  @default(false)
+  latitude               Float?
+  longitude              Float?
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  zone Zone @relation(fields: [zoneId], references: [id])
+
+  @@index([zoneId])
+  @@map("gates")
+}
+
+// ─────────────────────────────────────────
+// FACILITY
+// ─────────────────────────────────────────
+
+model Facility {
+  id        String       @id @default(uuid())
+  stadiumId String
+  zoneId    String?
+  type      FacilityType
+  name      String
+  latitude  Float?
+  longitude Float?
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+
+  stadium Stadium @relation(fields: [stadiumId], references: [id])
+  zone    Zone?   @relation(fields: [zoneId], references: [id])
+
+  @@index([stadiumId])
+  @@index([zoneId])
+  @@index([type])
+  @@map("facilities")
+}
+
+// ─────────────────────────────────────────
+// ROUTE
+// ─────────────────────────────────────────
+
+model Route {
+  id                 String   @id @default(uuid())
+  stadiumId          String
+  sourceZoneId       String
+  destinationZoneId  String
+  distance           Float?
+  wheelchairFriendly Boolean  @default(false)
+  estimatedTime      Int? // in seconds
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  stadium         Stadium @relation(fields: [stadiumId], references: [id])
+  sourceZone      Zone    @relation("SourceZone", fields: [sourceZoneId], references: [id])
+  destinationZone Zone    @relation("DestinationZone", fields: [destinationZoneId], references: [id])
+
+  @@index([stadiumId])
+  @@index([sourceZoneId])
+  @@index([destinationZoneId])
+  @@map("routes")
+}
+
+// ─────────────────────────────────────────
+// STADIUM PACKAGE
+// ─────────────────────────────────────────
+
+model StadiumPackage {
+  id         String   @id @default(uuid())
+  stadiumId  String
+  version    String
+  uploadedBy String
+  uploadDate DateTime @default(now())
+  filePaths  Json // { stadium, zones, facilities, gates, vendors, parking, emergency, translations }
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  stadium Stadium @relation(fields: [stadiumId], references: [id])
+
+  @@unique([stadiumId, version])
+  @@index([stadiumId])
+  @@map("stadium_packages")
+}
+
+// ─────────────────────────────────────────
+// DATASET
+// ─────────────────────────────────────────
+
+model Dataset {
+  id          String        @id @default(uuid())
+  filename    String
+  datasetType DatasetType
+  uploadedBy  String
+  uploadDate  DateTime      @default(now())
+  status      DatasetStatus @default(PENDING)
+  filePath    String
+  rowCount    Int?
+  errorLog    String?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  @@index([status])
+  @@index([uploadedBy])
+  @@map("datasets")
+}
+
+// ─────────────────────────────────────────
+// KNOWLEDGE DOCUMENT (RAG)
+// ─────────────────────────────────────────
+
+model KnowledgeDocument {
+  id           String   @id @default(uuid())
+  stadiumId    String
+  title        String
+  source       String?
+  documentType String
+  content      String // full text used for embedding
+  embeddingId  String? // reference to vector store
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  stadium Stadium @relation(fields: [stadiumId], references: [id])
+
+  @@index([stadiumId])
+  @@index([documentType])
+  @@map("knowledge_documents")
+}
+
+// ─────────────────────────────────────────
+// CONVERSATION
+// ─────────────────────────────────────────
+
+model Conversation {
+  id        String   @id @default(uuid())
+  userId    String
+  eventId   String?
+  stadiumId String?
+  title     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user            User             @relation(fields: [userId], references: [id])
+  event           Event?           @relation(fields: [eventId], references: [id])
+  stadium         Stadium?         @relation(fields: [stadiumId], references: [id])
+  messages        Message[]
+  recommendations Recommendation[]
+
+  @@index([userId])
+  @@index([eventId])
+  @@index([stadiumId])
+  @@index([createdAt])
+  @@map("conversations")
+}
+
+// ─────────────────────────────────────────
+// MESSAGE
+// ─────────────────────────────────────────
+
+model Message {
+  id             String        @id @default(uuid())
+  conversationId String
+  sender         MessageSender
+  message        String        @db.Text
+  metadata       Json? // for AI messages: confidence, intent, etc.
+  timestamp      DateTime      @default(now())
+
+  conversation Conversation @relation(fields: [conversationId], references: [id])
+
+  @@index([conversationId])
+  @@index([timestamp])
+  @@map("messages")
+}
+
+// ─────────────────────────────────────────
+// RECOMMENDATION
+// ─────────────────────────────────────────
+
+model Recommendation {
+  id             String   @id @default(uuid())
+  conversationId String
+  intent         String
+  recommendation String   @db.Text
+  confidence     Float // 0.0 - 1.0
+  reasoning      String   @db.Text
+  alternatives   Json? // array of alternative recommendations
+  generatedAt    DateTime @default(now())
+
+  conversation Conversation  @relation(fields: [conversationId], references: [id])
+  reasoningLog ReasoningLog?
+  feedback     Feedback[]
+
+  @@index([conversationId])
+  @@index([intent])
+  @@index([generatedAt])
+  @@map("recommendations")
+}
+
+// ─────────────────────────────────────────
+// REASONING LOG (Explainability)
+// ─────────────────────────────────────────
+
+model ReasoningLog {
+  id                 String   @id @default(uuid())
+  recommendationId   String   @unique
+  promptVersion      String
+  retrievedDocuments Json? // array of doc IDs / snippets used
+  model              String
+  latencyMs          Int
+  tokenUsage         Json? // { prompt, completion, total }
+  timestamp          DateTime @default(now())
+
+  recommendation Recommendation @relation(fields: [recommendationId], references: [id])
+
+  @@index([recommendationId])
+  @@map("reasoning_logs")
+}
+
+// ─────────────────────────────────────────
+// PROMPT TEMPLATE
+// ─────────────────────────────────────────
+
+model PromptTemplate {
+  id        String   @id @default(uuid())
+  name      String   @unique
+  version   String
+  prompt    String   @db.Text
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([name])
+  @@index([active])
+  @@map("prompt_templates")
+}
+
+// ─────────────────────────────────────────
+// INCIDENT
+// ─────────────────────────────────────────
+
+model Incident {
+  id          String           @id @default(uuid())
+  stadiumId   String
+  eventId     String?
+  category    String
+  severity    IncidentSeverity @default(LOW)
+  location    String?
+  description String           @db.Text
+  status      IncidentStatus   @default(OPEN)
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  resolvedAt  DateTime?
+
+  stadium Stadium @relation(fields: [stadiumId], references: [id])
+  event   Event?  @relation(fields: [eventId], references: [id])
+
+  @@index([stadiumId])
+  @@index([eventId])
+  @@index([severity])
+  @@index([status])
+  @@map("incidents")
+}
+
+// ─────────────────────────────────────────
+// FEEDBACK
+// ─────────────────────────────────────────
+
+model Feedback {
+  id               String   @id @default(uuid())
+  recommendationId String
+  userId           String
+  rating           Int // 1-5
+  comment          String?
+  createdAt        DateTime @default(now())
+
+  recommendation Recommendation @relation(fields: [recommendationId], references: [id])
+  user           User           @relation(fields: [userId], references: [id])
+
+  @@index([recommendationId])
+  @@index([userId])
+  @@map("feedback")
+}
+
+// ─────────────────────────────────────────
+// NOTIFICATION
+// ─────────────────────────────────────────
+
+model Notification {
+  id        String           @id @default(uuid())
+  userId    String
+  title     String
+  message   String
+  type      NotificationType @default(INFO)
+  read      Boolean          @default(false)
+  createdAt DateTime         @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([read])
+  @@index([createdAt])
+  @@map("notifications")
+}
+
+// ─────────────────────────────────────────
+// AUDIT LOG
+// ─────────────────────────────────────────
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  actorId    String?
+  action     String
+  resource   String
+  resourceId String?
+  ipAddress  String?
+  metadata   Json?
+  timestamp  DateTime @default(now())
+
+  actor User? @relation("AuditActor", fields: [actorId], references: [id])
+
+  @@index([actorId])
+  @@index([action])
+  @@index([resource])
+  @@index([timestamp])
+  @@map("audit_logs")
+}
