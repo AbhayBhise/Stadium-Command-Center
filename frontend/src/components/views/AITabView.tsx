@@ -302,7 +302,8 @@ export function AITabView({ initialQuery, queryTimestamp }: { initialQuery?: str
 
       if (detectedLang !== 'en' || urgencyNote !== 'LOW') {
         // Show translation hint for non-English or urgent queries
-        const displayLangName = { es: 'Spanish', fr: 'French', ar: 'Arabic', zh: 'Chinese', de: 'German', ja: 'Japanese' }[detectedLang] || detectedLang;
+        const langNames: Record<string, string> = { en: 'English', es: 'Spanish', fr: 'French', ar: 'Arabic', zh: 'Chinese', de: 'German', ja: 'Japanese' };
+        const displayLangName = langNames[detectedLang] || detectedLang;
         aiMessage = {
           ...aiMessage,
           isTyping: false,
