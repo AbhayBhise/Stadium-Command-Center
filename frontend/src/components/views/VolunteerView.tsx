@@ -63,7 +63,7 @@ export function VolunteerView() {
   const bottomRef = useRef<HTMLDivElement>(null);
   const [expandedSection, setExpandedSection] = useState<'crowd'|'translate'|'sop'|null>(null);
   const [isListening, setIsListening] = useState(false);
-  const recognitionRef = useRef<SpeechRecognition | null>(null);
+  const recognitionRef = useRef<any>(null);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
