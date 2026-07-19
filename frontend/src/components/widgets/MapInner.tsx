@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from 'react-leaflet';
 import L from 'leaflet';
-import { Volume2, VolumeX, Square, Navigation2, Loader2, AlertTriangle, CheckCircle, ChevronDown, Search } from 'lucide-react';
+import { Volume2, VolumeX, Square, Navigation2, Loader2, AlertTriangle, CheckCircle, ChevronDown, Search, Compass } from 'lucide-react';
 import { NavigationTarget } from '@/app/page';
 
 interface DefaultIcon extends L.Icon.Default {
@@ -67,15 +67,49 @@ function destinationOffsetForLabel(label: string): [number, number] {
   return [dLat, dLng];
 }
 
-function MapUpdater({ currentLoc, navState }: { currentLoc: [number, number] | null, navState: string }) {
+function MapUpdater({ 
+  currentLoc, 
+  navState, 
+  recenterCount,
+  onUserPanned 
+}: { 
+  currentLoc: [number, number] | null; 
+  navState: string; 
+  recenterCount: number;
+  onUserPanned: () => void;
+}) {
   const map = useMap();
-  const hasPanned = useRef(false);
+  const isAutoCentering = useRef(true);
+
+  // Auto center on new GPS location ticks if enabled
   useEffect(() => {
-    if (currentLoc && !hasPanned.current) {
+    if (currentLoc && isAutoCentering.current) {
       map.setView(currentLoc, navState === 'NAVIGATING' ? 18 : 16);
-      setTimeout(() => { hasPanned.current = true; }, 3000);
     }
   }, [currentLoc, navState, map]);
+
+  // Force recenter when button is clicked
+  useEffect(() => {
+    if (currentLoc) {
+      map.setView(currentLoc, navState === 'NAVIGATING' ? 18 : 16);
+      isAutoCentering.current = true;
+    }
+  }, [recenterCount]);
+
+  // Disable auto centering when user pans/zooms map manually
+  useEffect(() => {
+    const onMoveStart = (e: any) => {
+      if (e.originalEvent) {
+        isAutoCentering.current = false;
+        onUserPanned();
+      }
+    };
+    map.on('movestart', onMoveStart);
+    return () => {
+      map.off('movestart', onMoveStart);
+    };
+  }, [map, onUserPanned]);
+
   return null;
 }
 
@@ -115,6 +149,8 @@ export default function MapInner({ onClose, target }: { onClose?: () => void; ta
   const [routePanelOpen, setRoutePanelOpen] = useState(true);
   const [showDestPicker, setShowDestPicker] = useState(false);
   const [destInput, setDestInput] = useState('');
+  const [recenterCount, setRecenterCount] = useState(0);
+  const [showRecenterBtn, setShowRecenterBtn] = useState(false);
   
   const watchIdRef = useRef<number | null>(null);
   const lastLoc = useRef<[number, number] | null>(null);
@@ -361,9 +397,9 @@ export default function MapInner({ onClose, target }: { onClose?: () => void; ta
       {/* Destination Picker Modal */}
       {showDestPicker && (
         <div className="absolute inset-0 z-[2000] bg-black/60 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl w-full max-w-sm max-h-[80vh] flex flex-col overflow-hidden">
+          <div className="bg-white rounded-2xl w-full max-w-sm max-h-[80vh] flex flex-col overflow-hidden text-zinc-900 shadow-2xl">
             <div className="p-4 border-b border-zinc-200 flex items-center justify-between">
-              <h3 className="font-bold text-lg">Choose Destination</h3>
+              <h3 className="font-bold text-lg text-zinc-900">Choose Destination</h3>
               <button onClick={() => setShowDestPicker(false)} className="text-zinc-500 text-2xl">&times;</button>
             </div>
             <div className="p-3">
@@ -374,7 +410,7 @@ export default function MapInner({ onClose, target }: { onClose?: () => void; ta
                   value={destInput}
                   onChange={(e) => setDestInput(e.target.value)}
                   placeholder="Search destinations..."
-                  className="bg-transparent outline-none text-sm flex-1"
+                  className="bg-transparent outline-none text-sm flex-1 text-zinc-900"
                 />
               </div>
             </div>
@@ -385,10 +421,10 @@ export default function MapInner({ onClose, target }: { onClose?: () => void; ta
                   <button
                     key={d.label}
                     onClick={() => pickDestination(d.label)}
-                    className="w-full flex items-center gap-3 px-3 py-3 rounded-xl hover:bg-zinc-100 transition-colors text-left"
+                    className="w-full flex items-center gap-3 px-3 py-3 rounded-xl hover:bg-zinc-100 transition-colors text-left text-zinc-900"
                   >
                     <span className="text-xl">{d.icon}</span>
-                    <span className="font-medium">{d.label}</span>
+                    <span className="font-semibold text-zinc-900">{d.label}</span>
                   </button>
                 ))}
               {destInput.trim() && (
@@ -436,7 +472,7 @@ export default function MapInner({ onClose, target }: { onClose?: () => void; ta
           {routeCoords.length > 0 && (
             <Polyline positions={routeCoords} color="#3b82f6" weight={8} opacity={0.9} />
           )}
-          <MapUpdater currentLoc={currentLoc} navState={navState} />
+          <MapUpdater currentLoc={currentLoc} navState={navState} recenterCount={recenterCount} onUserPanned={() => setShowRecenterBtn(true)} />
         </MapContainer>
         
         {navState === 'NAVIGATING' && (
@@ -447,6 +483,21 @@ export default function MapInner({ onClose, target }: { onClose?: () => void; ta
             </div>
           </div>
         )}
+
+        {showRecenterBtn && currentLoc && (
+          <div className="absolute top-48 right-3 z-[1000]">
+            <button 
+              onClick={() => {
+                setRecenterCount(c => c + 1);
+                setShowRecenterBtn(false);
+              }}
+              className="p-3 bg-zinc-900 border border-zinc-800 hover:bg-zinc-800 text-white rounded-full shadow-2xl flex items-center justify-center transition-all active:scale-95 cursor-pointer"
+              title="Recenter Map"
+            >
+              <Compass size={20} className="text-blue-500" />
+            </button>
+          </div>
+        )}
       </div>
       
       {/* Collapsible Route Panel */}
@@ -454,13 +505,15 @@ export default function MapInner({ onClose, target }: { onClose?: () => void; ta
         {/* Collapse Handle */}
         <button
           onClick={() => setRoutePanelOpen(p => !p)}
-          className="mx-auto flex items-center gap-1 bg-white rounded-t-2xl px-6 py-1.5 shadow-lg border-t border-x border-zinc-200 w-fit"
+          className="mx-auto flex items-center gap-2 bg-zinc-950 border-t border-x border-zinc-800 rounded-t-2xl px-5 py-2.5 shadow-2xl w-fit active:scale-95 transition-all text-white"
         >
-          <div className="w-8 h-1 bg-zinc-300 rounded-full" />
-          <ChevronDown size={16} className={`text-zinc-400 transition-transform ${routePanelOpen ? 'rotate-180' : ''}`} />
+          <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">
+            {routePanelOpen ? "Hide Route Details" : "Show Route Details"}
+          </span>
+          <ChevronDown size={14} className={`text-zinc-400 transition-transform ${routePanelOpen ? '' : 'rotate-180'}`} />
         </button>
 
-        <div className="bg-white shadow-2xl p-4 max-h-[40vh] overflow-y-auto">
+        <div className="bg-zinc-950 border-t border-zinc-800 shadow-2xl p-4 max-h-[40vh] overflow-y-auto text-white">
           {navState === 'ARRIVED' ? (
             <div className="flex flex-col items-center gap-2">
               <div className="flex flex-col items-center justify-center gap-2 text-emerald-600 font-bold py-4">
@@ -476,17 +529,20 @@ export default function MapInner({ onClose, target }: { onClose?: () => void; ta
             </div>
           ) : (
             <div className="flex flex-col gap-3">
-              {/* Quick destination buttons */}
+              {/* Quick destination chips */}
               {navState === 'IDLE' && (
-                <div className="flex flex-wrap gap-2">
+                <div 
+                  className="flex flex-row flex-nowrap overflow-x-auto gap-2 pb-2 w-full select-none" 
+                  style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
+                >
                   {DEFAULT_DESTINATIONS.map(d => (
                     <button
                       key={d.label}
                       onClick={() => pickDestination(d.label)}
-                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${
+                      className={`flex items-center gap-1.5 px-4 py-2 rounded-full text-xs font-semibold transition-colors flex-shrink-0 cursor-pointer ${
                         destinationLabel === d.label
-                          ? 'bg-blue-600 text-white'
-                          : 'bg-zinc-100 text-zinc-700 hover:bg-zinc-200'
+                          ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/20'
+                          : 'bg-zinc-900 text-zinc-300 border border-zinc-800 hover:bg-zinc-800'
                       }`}
                     >
                       <span>{d.icon}</span>
@@ -495,24 +551,24 @@ export default function MapInner({ onClose, target }: { onClose?: () => void; ta
                   ))}
                   <button
                     onClick={() => setShowDestPicker(true)}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium bg-zinc-100 text-zinc-700 hover:bg-zinc-200 transition-colors"
+                    className="flex items-center gap-1.5 px-4 py-2 rounded-full text-xs font-semibold bg-zinc-900 text-zinc-300 border border-zinc-800 hover:bg-zinc-800 transition-colors flex-shrink-0 cursor-pointer"
                   >
-                    <Search size={14} />
+                    <Search size={12} />
                     More
                   </button>
                 </div>
               )}
 
-              <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3">
-                <div className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Route Summary</div>
-                <div className="mt-1 text-sm text-zinc-800">
-                  <div><span className="font-medium">To:</span> {destinationLabel}</div>
-                  <div><span className="font-medium">Distance:</span> {computedDistance}m</div>
+              <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-3 shadow-inner">
+                <div className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">Route Summary</div>
+                <div className="mt-1 text-sm text-zinc-100">
+                  <div><span className="font-semibold text-zinc-400">To:</span> {destinationLabel}</div>
+                  <div><span className="font-semibold text-zinc-400">Distance:</span> {computedDistance}m</div>
                 </div>
                 {plannedSteps.length > 0 && (
-                  <ol className="mt-2 list-decimal pl-4 text-xs text-zinc-600">
+                  <ol className="mt-2 list-decimal pl-4 text-xs text-zinc-300 space-y-1">
                     {plannedSteps.slice(0, 3).map((step) => (
-                      <li key={`${step.order}-${step.to_zone}`}>{step.instruction}</li>
+                      <li key={`${step.order}-${step.to_zone}`} className="leading-snug">{step.instruction}</li>
                     ))}
                   </ol>
                 )}
@@ -529,12 +585,12 @@ export default function MapInner({ onClose, target }: { onClose?: () => void; ta
               
               <div className="flex items-center justify-between px-2">
                 <div className="flex flex-col">
-                  <span className="text-2xl font-bold text-green-600">{Math.max(1, Math.round(computedDistance/80))} min</span>
-                  <span className="text-sm text-zinc-500 font-medium">{computedDistance} meters {etaStr ? `\u2022 Arrival ${etaStr}` : ''}</span>
+                  <span className="text-2xl font-bold text-green-500">{Math.max(1, Math.round(computedDistance/80))} min</span>
+                  <span className="text-sm text-zinc-400 font-medium">{computedDistance} meters {etaStr ? `\u2022 Arrival ${etaStr}` : ''}</span>
                 </div>
                 <button 
                   onClick={toggleMute}
-                  className="p-3 bg-zinc-100 hover:bg-zinc-200 text-zinc-600 rounded-full transition-colors"
+                  className="p-3 bg-zinc-900 border border-zinc-800 hover:bg-zinc-800 text-zinc-300 rounded-full transition-colors active:scale-95 cursor-pointer"
                 >
                   {isMuted ? <VolumeX size={20} /> : <Volume2 size={20} />}
                 </button>
@@ -544,7 +600,7 @@ export default function MapInner({ onClose, target }: { onClose?: () => void; ta
                 {navState === 'IDLE' && (
                   <button 
                     onClick={startNav}
-                    className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-xl text-base font-bold transition-all shadow-lg shadow-blue-600/30 flex items-center justify-center gap-2 active:scale-[0.98]"
+                    className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-xl text-base font-bold transition-all shadow-lg shadow-blue-600/30 flex items-center justify-center gap-2 active:scale-[0.98] cursor-pointer"
                   >
                     <Navigation2 size={20} /> Start
                   </button>
@@ -553,7 +609,7 @@ export default function MapInner({ onClose, target }: { onClose?: () => void; ta
                 {navState === 'NAVIGATING' && (
                   <button 
                     onClick={endNav}
-                    className="flex-1 bg-red-600 hover:bg-red-700 text-white py-3 rounded-xl text-base font-bold transition-all shadow-lg shadow-red-600/30 flex items-center justify-center gap-2 active:scale-[0.98]"
+                    className="flex-1 bg-red-600 hover:bg-red-700 text-white py-3 rounded-xl text-base font-bold transition-all shadow-lg shadow-red-600/30 flex items-center justify-center gap-2 active:scale-[0.98] cursor-pointer"
                   >
                     <Square size={20} /> Exit
                   </button>
@@ -562,7 +618,7 @@ export default function MapInner({ onClose, target }: { onClose?: () => void; ta
                 {navState === 'IDLE' && (
                   <button 
                     onClick={endNav}
-                    className="w-auto px-6 bg-zinc-200 hover:bg-zinc-300 text-zinc-800 py-3 rounded-xl text-base font-bold transition-all active:scale-[0.98]"
+                    className="w-auto px-6 bg-zinc-900 hover:bg-zinc-800 text-zinc-300 py-3 rounded-xl text-base font-bold border border-zinc-800 transition-all active:scale-[0.98] cursor-pointer"
                   >
                     Cancel
                   </button>
