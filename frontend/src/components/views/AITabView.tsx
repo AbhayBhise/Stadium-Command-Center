@@ -31,7 +31,7 @@ interface Message {
 }
 
 export function AITabView({ initialQuery, queryTimestamp }: { initialQuery?: string; queryTimestamp?: number }) {
-  const { isDebugMode, language } = useContext(AppContext);
+  const { isDebugMode, language, needs } = useContext(AppContext);
   const [messages, setMessages] = useState<Message[]>([
     {
       id: 'welcome',
@@ -208,7 +208,8 @@ export function AITabView({ initialQuery, queryTimestamp }: { initialQuery?: str
           'Content-Type': 'application/json',
           'x-user-id': 'user-frontend',
           'x-user-role': 'SPECTATOR',
-          'x-user-language': language
+          'x-user-language': language,
+          'x-accessibility-needs': needs.join(',')
         },
         body: JSON.stringify({ message: text, image: imagePayload }),
       });

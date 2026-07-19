@@ -2,6 +2,8 @@ function stripTrailingSlash(value: string): string {
   return value.replace(/\/+$/, '');
 }
 
+const PRODUCTION_BACKEND_FALLBACK = 'https://stadium-command-center.onrender.com';
+
 function getConfiguredBaseUrl(): string | null {
   const configured = process.env.NEXT_PUBLIC_API_URL || process.env.NEXT_PUBLIC_BACKEND_URL;
   if (configured && configured.trim().length > 0) {
@@ -15,13 +17,16 @@ export function getBackendBaseUrl(): string {
   if (configured) return configured;
 
   if (typeof window !== 'undefined') {
-    const protocol = window.location.protocol === 'https:' ? 'https:' : 'http:';
-    const frontendPort = window.location.port;
-    const backendPort = frontendPort === '3000' ? '4000' : '3000';
-    return `${protocol}//${window.location.hostname}:${backendPort}`;
+    const host = window.location.hostname;
+    if (host === 'localhost' || host === '127.0.0.1' || host === '::1') {
+      const protocol = window.location.protocol === 'https:' ? 'https:' : 'http:';
+      const frontendPort = window.location.port;
+      const backendPort = frontendPort === '3000' ? '4000' : '3000';
+      return `${protocol}//${host}:${backendPort}`;
+    }
   }
 
-  return 'http://localhost:4000';
+  return PRODUCTION_BACKEND_FALLBACK;
 }
 
 export function buildBackendUrl(pathname: string): string {
@@ -34,15 +39,19 @@ function getCandidateBaseUrls(): string[] {
   if (configured) return [configured];
 
   if (typeof window === 'undefined') {
-    return ['http://localhost:4000', 'http://localhost:3000'];
+    return [PRODUCTION_BACKEND_FALLBACK, 'http://localhost:4000'];
   }
 
-  const protocol = window.location.protocol === 'https:' ? 'https:' : 'http:';
   const host = window.location.hostname;
-  const frontendPort = window.location.port;
-  const primaryPort = frontendPort === '3000' ? '4000' : '3000';
-  const candidates = [primaryPort, '4000', '3000', '3001'];
-  return Array.from(new Set(candidates)).map((port) => `${protocol}//${host}:${port}`);
+  if (host === 'localhost' || host === '127.0.0.1' || host === '::1') {
+    const protocol = window.location.protocol === 'https:' ? 'https:' : 'http:';
+    const frontendPort = window.location.port;
+    const primaryPort = frontendPort === '3000' ? '4000' : '3000';
+    const candidates = [primaryPort, '4000', '3000', '3001'];
+    return Array.from(new Set(candidates)).map((port) => `${protocol}//${host}:${port}`);
+  }
+
+  return [PRODUCTION_BACKEND_FALLBACK];
 }
 
 export async function fetchBackend(pathname: string, init?: RequestInit): Promise<Response> {

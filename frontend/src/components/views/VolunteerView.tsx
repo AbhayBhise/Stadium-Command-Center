@@ -3,6 +3,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Shield, Users, Languages, Cpu, AlertTriangle, Mic, Send, Loader2 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
+import { fetchBackend } from '../../lib/backend-api';
 
 type ZoneLevel = 'low' | 'medium' | 'high' | 'critical';
 
@@ -88,7 +89,7 @@ export function VolunteerView() {
     const fetchCrowd = async () => {
       try {
  
-        const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000'}/api/crowd`);
+        const res = await fetchBackend('/api/crowd');
         if (!res.ok) throw new Error('Failed');
         const data = await res.json();
         if (data.zones) {
@@ -158,22 +159,54 @@ export function VolunteerView() {
     setMessages(prev => [...prev, { id: typingId, sender: 'ai', text: 'Thinking...', isTyping: true }]);
 
     try {
-      // Try backend first
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000'}/api/chat`, {
+      const response = await fetchBackend('/api/chat', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-user-role': 'VOLUNTEER', 'x-user-id': 'volunteer-1', 'x-user-language': 'English' },
+        headers: { 
+          'Content-Type': 'application/json', 
+          'x-user-role': 'VOLUNTEER', 
+          'x-user-id': 'volunteer-1', 
+          'x-user-language': 'English' 
+        },
         body: JSON.stringify({ message: `[VOLUNTEER_COPILOT] ${text}` })
       });
 
-      if (!response.ok) throw new Error('Backend unavailable');
+      if (!response.ok || !response.body) throw new Error('Backend unavailable');
 
-      const data = await response.json();
-      const aiText = data.reply || data.response || data.message || text;
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder('utf-8');
+      let done = false;
+      let finalData: any = null;
 
+      while (!done) {
+        const { value, done: readerDone } = await reader.read();
+        done = readerDone;
+        if (value) {
+          const chunk = decoder.decode(value, { stream: true });
+          const lines = chunk.split('\n');
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              try {
+                const parsed = JSON.parse(line.replace('data: ', ''));
+                if (parsed.type === 'complete') {
+                  finalData = parsed.data;
+                }
+              } catch (e) {
+                // Ignore parsing errors
+              }
+            }
+          }
+        }
+      }
+
+      if (!finalData || !finalData.response) {
+        throw new Error('Invalid response structure');
+      }
+
+      const aiText = finalData.response;
       setMessages(prev => prev.map(m => m.id === typingId ? {
         id: typingId, sender: 'ai', text: aiText, isTyping: false
       } : m));
-    } catch {
+    } catch (err) {
       // If backend down, use rules-based response
       const localResponse = generateLocalVolunteerResponse(text);
       setTimeout(() => {

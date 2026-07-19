@@ -221,7 +221,7 @@ export default function MapInner({ onClose, target }: { onClose?: () => void; ta
           const timeDiff = (now - lastTime.current) / 1000;
           if (timeDiff > 0) setSpeed(Math.round((dist / timeDiff) * 3.6));
         } else {
-          if (!destLoc.current) {
+          if (!destLoc) {
             const simDest: [number, number] = [latitude + dLatOffset, longitude + dLngOffset];
             setDestLoc(simDest);
           }
