@@ -87,7 +87,8 @@ export function VolunteerView() {
   useEffect(() => {
     const fetchCrowd = async () => {
       try {
-        const res = await fetch('http://localhost:4000/api/crowd');
+ 
+        const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000'}/api/crowd`);
         if (!res.ok) throw new Error('Failed');
         const data = await res.json();
         if (data.zones) {
@@ -158,7 +159,7 @@ export function VolunteerView() {
 
     try {
       // Try backend first
-      const response = await fetch('http://localhost:4000/api/chat', {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000'}/api/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-user-role': 'VOLUNTEER', 'x-user-id': 'volunteer-1', 'x-user-language': 'English' },
         body: JSON.stringify({ message: `[VOLUNTEER_COPILOT] ${text}` })

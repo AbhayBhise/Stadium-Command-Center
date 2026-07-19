@@ -3,7 +3,7 @@ function stripTrailingSlash(value: string): string {
 }
 
 function getConfiguredBaseUrl(): string | null {
-  const configured = process.env.NEXT_PUBLIC_BACKEND_URL;
+  const configured = process.env.NEXT_PUBLIC_API_URL || process.env.NEXT_PUBLIC_BACKEND_URL;
   if (configured && configured.trim().length > 0) {
     return stripTrailingSlash(configured.trim());
   }
