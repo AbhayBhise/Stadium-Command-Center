@@ -39,19 +39,25 @@ function getCandidateBaseUrls(): string[] {
   if (configured) return [configured];
 
   if (typeof window === 'undefined') {
-    return [PRODUCTION_BACKEND_FALLBACK, 'http://localhost:4000'];
+    return [PRODUCTION_BACKEND_FALLBACK, 'http://localhost:4000', 'http://localhost:3000'];
   }
 
   const host = window.location.hostname;
-  if (host === 'localhost' || host === '127.0.0.1' || host === '::1') {
-    const protocol = window.location.protocol === 'https:' ? 'https:' : 'http:';
-    const frontendPort = window.location.port;
-    const primaryPort = frontendPort === '3000' ? '4000' : '3000';
-    const candidates = [primaryPort, '4000', '3000', '3001'];
-    return Array.from(new Set(candidates)).map((port) => `${protocol}//${host}:${port}`);
-  }
-
-  return [PRODUCTION_BACKEND_FALLBACK];
+  const protocol = window.location.protocol === 'https:' ? 'https:' : 'http:';
+  const frontendPort = window.location.port || '80';
+  
+  // Predict backend port based on frontend port (e.g. if frontend is 3000, backend is likely 4000 or 3001)
+  const primaryPort = frontendPort === '3000' ? '4000' : '3000';
+  
+  const candidates = [
+    `${protocol}//${host}:${primaryPort}`,
+    `${protocol}//${host}:4000`,
+    `${protocol}//${host}:3000`,
+    `${protocol}//${host}:3001`,
+    PRODUCTION_BACKEND_FALLBACK
+  ];
+  
+  return Array.from(new Set(candidates));
 }
 
 export async function fetchBackend(pathname: string, init?: RequestInit): Promise<Response> {
