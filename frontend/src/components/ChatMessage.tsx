@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Bot, User, ChevronDown, ChevronUp, ShieldAlert, ShieldCheck, FileText, Info, Activity, Search, Brain, CheckCircle2, Clock } from 'lucide-react';
+import { Bot, User, ChevronDown, ChevronUp, ShieldAlert, ShieldCheck, FileText, Info, Activity, Search, Brain, CheckCircle2, Clock, Volume2, Square } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { cn } from '@/lib/utils';
 import { AppContext } from '@/app/page';
@@ -43,8 +43,33 @@ import { CrowdWidget } from './widgets/CrowdWidget';
 
 export function ChatMessage({ message }: ChatMessageProps) {
   const [showReasoning, setShowReasoning] = useState(true);
+  const [isSpeaking, setIsSpeaking] = useState(false);
   const { isDebugMode } = useContext(AppContext);
   const isAI = message.sender === 'ai';
+
+  const toggleSpeech = () => {
+    if (!('speechSynthesis' in window)) return;
+    
+    if (isSpeaking) {
+      window.speechSynthesis.cancel();
+      setIsSpeaking(false);
+      return;
+    }
+    
+    window.speechSynthesis.cancel();
+    const msg = new SpeechSynthesisUtterance(message.text);
+    msg.rate = 1.0;
+    msg.pitch = 1.0;
+    const voices = window.speechSynthesis.getVoices();
+    const voice = voices.find(v => v.name.includes('Google US English') || v.name.includes('Premium') || v.lang.startsWith('en-'));
+    if (voice) msg.voice = voice;
+    
+    msg.onend = () => setIsSpeaking(false);
+    msg.onerror = () => setIsSpeaking(false);
+    
+    setIsSpeaking(true);
+    window.speechSynthesis.speak(msg);
+  };
 
   const confidenceColor = 
     (message.confidence?.score || 1) >= 0.8 ? 'text-emerald-400 bg-emerald-400/10 border-emerald-400/20' :
@@ -107,12 +132,21 @@ export function ChatMessage({ message }: ChatMessageProps) {
         ) : (
           <div className="w-full">
             <div className={cn(
-              "prose prose-invert max-w-none text-sm md:text-base leading-relaxed break-words",
+              "prose prose-invert max-w-none text-sm md:text-base leading-relaxed break-words relative group",
               isAI ? "text-zinc-200" : "bg-zinc-800 px-5 py-3 rounded-2xl rounded-tr-none text-zinc-100",
               message.error && "text-rose-400",
               message.intent ? "mb-4" : ""
             )}>
               <ReactMarkdown>{message.text}</ReactMarkdown>
+              {isAI && !message.error && (
+                <button
+                  onClick={toggleSpeech}
+                  className="absolute -right-10 top-0 p-2 text-zinc-500 hover:text-zinc-300 transition-colors opacity-0 group-hover:opacity-100 bg-zinc-900 rounded-full border border-zinc-800"
+                  title="Read aloud"
+                >
+                  {isSpeaking ? <Square size={16} className="fill-current" /> : <Volume2 size={16} />}
+                </button>
+              )}
             </div>
             
             {message.intent && (
