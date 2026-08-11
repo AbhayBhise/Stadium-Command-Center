@@ -186,7 +186,7 @@ export default function MapInner({ onClose, target }: { onClose?: () => void; ta
           currentStepIdx.current = 0;
           announcedSteps.current.clear();
         }
-        setErrorMsg(null);
+        setErrorMsg((prev) => prev === 'Route unavailable' ? null : prev);
         return true;
       }
     } catch {
