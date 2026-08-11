@@ -12,9 +12,9 @@ const MapInner = dynamic(() => import('./MapInner'), {
   ),
 });
 
-export function NavigationWidget({ onClose, target }: { onClose?: () => void; target?: NavigationTarget | null }) {
+export function NavigationWidget({ onClose, target, fullHeight = false }: { onClose?: () => void; target?: NavigationTarget | null; fullHeight?: boolean }) {
   return (
-    <div className="w-full h-[350px] min-h-[300px] flex flex-col rounded-2xl overflow-hidden border border-zinc-800 relative mt-2">
+    <div className={`w-full flex flex-col overflow-hidden relative ${fullHeight ? 'h-full flex-1' : 'h-[350px] min-h-[300px] rounded-2xl border border-zinc-800 mt-2'}`}>
       <MapInner onClose={onClose} target={target} />
     </div>
   );
