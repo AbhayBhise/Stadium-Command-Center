@@ -280,6 +280,9 @@ export default function MapInner({ onClose, target }: { onClose?: () => void; ta
         else if (err.code === 3 && locState.current === 'INIT') {
           setNavState('LOADING');
           setErrorMsg('Acquiring GPS\u2026');
+        } else {
+          setErrorMsg('Please turn on your location and allow permissions.');
+          setNavState('ERROR');
         }
       },
       { enableHighAccuracy: false, timeout: 10000, maximumAge: 10000 }
