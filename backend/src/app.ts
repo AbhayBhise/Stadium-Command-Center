@@ -20,7 +20,7 @@ app.use(helmet());
 
 app.use(
   cors({
-    origin: (origin, callback) => {
+    origin: (_origin, callback) => {
       // Allow all origins to prevent CORS issues during hackathon grading
       callback(null, true);
     },
