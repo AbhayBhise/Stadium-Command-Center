@@ -273,7 +273,10 @@ export default function MapInner({ onClose, target }: { onClose?: () => void; ta
         setErrorMsg(null);
       },
       (err) => {
-        if (err.code === 1) { setErrorMsg('Permission denied.'); setNavState('ERROR'); }
+        if (err.code === 1 || err.code === 2) { 
+          setErrorMsg('Please turn on your location'); 
+          setNavState('ERROR'); 
+        }
         else if (err.code === 3 && locState.current === 'INIT') {
           setNavState('LOADING');
           setErrorMsg('Acquiring GPS\u2026');
