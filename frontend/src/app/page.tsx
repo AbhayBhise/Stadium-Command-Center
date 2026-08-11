@@ -17,7 +17,10 @@ export const AppContext = React.createContext({
   language: 'English',
   setLanguage: (lang: string) => {},
   needs: [] as string[],
-  toggleNeed: (need: string) => {}
+  toggleNeed: (need: string) => {},
+  user: null as { name: string; email: string } | null,
+  login: (email: string, name: string) => {},
+  logout: () => {}
 });
 
 export interface NavigationTarget {
@@ -34,6 +37,10 @@ export default function Home() {
   const toggleNeed = (need: string) => {
     setNeeds(prev => prev.includes(need) ? prev.filter(n => n !== need) : [...prev, need]);
   };
+
+  const [user, setUser] = useState<{ name: string; email: string } | null>(null);
+  const login = (email: string, name: string) => setUser({ email, name });
+  const logout = () => setUser(null);
 
   const [activeTab, setActiveTab] = useState('home');
   const [aiQuery, setAiQuery] = useState<{text: string, ts: number} | null>(null);
@@ -93,7 +100,7 @@ export default function Home() {
   }, []);
 
   return (
-    <AppContext.Provider value={{ isDebugMode, toggleDebugMode, language, setLanguage, needs, toggleNeed }}>
+    <AppContext.Provider value={{ isDebugMode, toggleDebugMode, language, setLanguage, needs, toggleNeed, user, login, logout }}>
       <main className={`w-full h-[100dvh] bg-black overflow-hidden flex flex-col relative ${needs.includes('visual') ? 'high-contrast-mode' : ''}`}>
         
         <div className="flex-1 w-full h-full relative overflow-hidden flex flex-col">
